@@ -2,52 +2,6 @@ const Video = require('../models/videoModel');
 const Playlist = require('../models/playlistModel');
 const jwt = require('jsonwebtoken');
 
-exports.obtenerVideosPorPlaylist = async (req, res) => {
-    try {
-        const authToken = req.headers['authorization'];
-        if (!authToken) {
-            return res.status(401).json({ error: 'Token de autorización no proporcionado' });
-        }
-
-        const decodedToken = jwt.verify(authToken.split(' ')[1], '12345');
-        const userId = decodedToken.userId;
-        const { playlistId } = req.params;
-
-        const videos = await Video.find({ playlistId, userId });
-        res.json(videos);
-    } catch (error) {
-        res.status(500).json({ error: 'Error al obtener los videos' });
-    }
-};
-
-exports.buscarVideos = async (req, res) => {
-    try {
-        const authToken = req.headers['authorization'];
-        if (!authToken) {
-            return res.status(401).json({ error: 'Token de autorización no proporcionado' });
-        }
-
-        const { restrictedUserId, searchText } = req.body;
-        if (!restrictedUserId || !searchText) {
-            return res.status(400).json({ error: 'ID de usuario restringido y texto de búsqueda son requeridos' });
-        }
-
-        const playlists = await Playlist.find({ perfilesAsociados: restrictedUserId });
-        const playlistIds = playlists.map(playlist => playlist._id);
-
-        const videos = await Video.find({
-            playlistId: { $in: playlistIds },
-            $or: [
-                { nombre: { $regex: searchText, $options: 'i' } },
-                { descripcion: { $regex: searchText, $options: 'i' } }
-            ]
-        });
-
-        res.json(videos);
-    } catch (error) {
-        res.status(500).json({ error: 'Error al buscar los videos' });
-    }
-};
 
 exports.agregarVideo = async (req, res) => {
     try {
