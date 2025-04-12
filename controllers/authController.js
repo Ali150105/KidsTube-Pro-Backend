@@ -1,74 +1,188 @@
 const User = require('../models/user');
-const jwt = require('jsonwebtoken');
 const bcrypt = require('bcrypt');
+const jwt = require('jsonwebtoken');
+const nodemailer = require('nodemailer');
+const twilio = require('twilio');
+
+// Configuración de Nodemailer
+const transporter = nodemailer.createTransport({
+    service: 'gmail',
+    auth: {
+        user: 'correo', // Reemplaza con tu correo
+        pass: 'ibxhskjthuzetghr'
+    }
+});
+
+// Configuración de Twilio
+const twilioClient = twilio('AC03145eff7442f128edbc1795a68f0bb8', '5d0ed5d0d20d93802105051ef6652d2a');
+
+const calculateAge = (birthDate) => {
+    const today = new Date();
+    const birth = new Date(birthDate);
+    let age = today.getFullYear() - birth.getFullYear();
+    const monthDiff = today.getMonth() - birth.getMonth();
+    if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birth.getDate())) {
+        age--;
+    }
+    return age;
+};
 
 exports.register = async (req, res) => {
     try {
-        const { username, password, pin, firstName, lastName, country, dateOfBirth } = req.body;
-            
-        const birthDate = new Date(dateOfBirth);
-        const today = new Date();
-        const age = today.getFullYear() - birthDate.getFullYear();
-        const month = today.getMonth() - birthDate.getMonth();
-        if (month < 0 || (month === 0 && today.getDate() < birthDate.getDate())) {
-            age--;
-        }
+        const { email, password, phoneNumber, pin, name, lastName, country, birthDate } = req.body;
+
+        const age = calculateAge(birthDate);
         if (age < 18) {
-            return res.status(400).json({ error: 'Debes ser mayor de 18 años para registrarte.' });
+            return res.status(400).json({ message: 'Debes ser mayor de 18 años' });
         }
-        
-        const user = new User({ 
-            username, 
-            password, 
-            pin, 
-            firstName, 
-            lastName, 
-            country, 
-            dateOfBirth 
+
+        const existingUser = await User.findOne({ email });
+        if (existingUser) {
+            return res.status(400).json({ message: 'El correo ya está registrado' });
+        }
+
+        const hashedPassword = await bcrypt.hash(password, 10);
+        const user = new User({
+            email,
+            password: hashedPassword,
+            phoneNumber,
+            pin,
+            name,
+            lastName,
+            country,
+            birthDate,
+            status: 'pending'
         });
-        
+
         await user.save();
-        res.status(201).json({ message: 'Usuario creado exitosamente' });
+
+        // Generar token de verificación
+        const verificationToken = jwt.sign({ email }, 'verification-secret', { expiresIn: '1h' });
+        const verificationLink = `http://localhost:3000/auth/verify-email?token=${verificationToken}`;
+
+        // Enviar correo de verificación
+        await transporter.sendMail({
+            from: '"KidsTube" <tu-email@gmail.com>',
+            to: email,
+            subject: 'Verifica tu cuenta en KidsTube',
+            html: `<p>Haz clic en el siguiente enlace para verificar tu cuenta:</p>
+             <a href="${verificationLink}">Verificar Correo</a>`
+        });
+
+        res.status(201).json({ message: 'Usuario registrado. Revisa tu correo para verificar tu cuenta.' });
     } catch (error) {
-        res.status(400).json({ error: error.message });
+        res.status(500).json({ message: 'Error al registrar usuario', error });
+    }
+};
+
+exports.verifyEmail = async (req, res) => {
+    try {
+        const { token } = req.query;
+        const decoded = jwt.verify(token, 'verification-secret');
+        const user = await User.findOne({ email: decoded.email });
+
+        if (!user) {
+            return res.status(400).json({ message: 'Usuario no encontrado' });
+        }
+
+        user.status = 'active';
+        await user.save();
+
+        res.redirect('http://localhost:5500/index.html'); // Redirige al login
+    } catch (error) {
+        res.status(400).json({ message: 'Enlace de verificación inválido o expirado' });
     }
 };
 
 exports.login = async (req, res) => {
     try {
-        const { username, password } = req.body;
-        const user = await User.findOne({ username });
-
-        // Verifica si el usuario existe y si la contraseña coincide utilizando Mongoose
-        if (!user || user.password !== password) {
-            throw new Error('Credenciales inválidas');
-        }
-
-        // Genera el payload del JWT con los datos del usuario
-        const payload = {
-            userId: user._id,
-            username: user.username,
-            userPin: user.pin,
-            verificar: 'false',
-            // Otros datos del usuario que quieras incluir en el token
-        };
-
-        // Firma el token utilizando un secreto seguro
-        const token = jwt.sign(payload, '12345', {
-            expiresIn: '1d' // Define la expiración del token (por ejemplo, 1 día)
+      const { email, password } = req.body;
+      const user = await User.findOne({ email });
+  
+      if (!user) {
+        return res.status(400).json({ message: 'Usuario no encontrado' });
+      }
+  
+      if (user.status === 'pending') {
+        return res.status(403).json({ message: 'Cuenta pendiente de verificación. Revisa tu correo.' });
+      }
+  
+      const isMatch = await bcrypt.compare(password, user.password);
+      if (!isMatch) {
+        return res.status(400).json({ message: 'Contraseña incorrecta' });
+      }
+  
+      if (!user.phoneNumber || !/^\+\d{10,15}$/.test(user.phoneNumber)) {
+        return res.status(400).json({ message: 'Número de teléfono inválido. Debe estar en formato internacional (ej: +50612345678)' });
+      }
+  
+      // Generar un nuevo código solo si no hay uno existente o si ha expirado
+      let verificationCode = user.tempCode;
+      const now = new Date();
+      if (!verificationCode || !user.tempCodeExpires || now > user.tempCodeExpires) {
+        verificationCode = Math.floor(100000 + Math.random() * 900000).toString();
+        user.tempCode = verificationCode;
+        user.tempCodeExpires = new Date(now.getTime() + 5 * 60 * 1000); // Expira en 5 minutos
+        await user.save();
+  
+        console.log(`Código generado y guardado para ${email}: ${verificationCode}`);
+  
+        // Enviar SMS con Twilio
+        await twilioClient.messages.create({
+          body: `Tu código de verificación para KidsTube es: ${verificationCode}`,
+          from: process.env.TWILIO_PHONE_NUMBER,
+          to: user.phoneNumber
         });
-        console.log(token);
-
-        res.status(200).json({ token });
+      } else {
+        console.log(`Código existente para ${email}: ${verificationCode}`);
+      }
+  
+      res.status(200).json({ message: 'Código de verificación enviado al SMS', email });
     } catch (error) {
-        res.status(401).json({ error: error.message });
+      console.error('Error general en login:', error);
+      res.status(500).json({ message: 'Error al iniciar sesión', error });
     }
-};
+  };
+
+  exports.verifyCode = async (req, res) => {
+    try {
+      const { email, code } = req.body;
+      const user = await User.findOne({ email });
+  
+      if (!user) {
+        return res.status(400).json({ message: 'Usuario no encontrado' });
+      }
+  
+      const now = new Date();
+      if (!user.tempCode || !user.tempCodeExpires || now > user.tempCodeExpires) {
+        return res.status(400).json({ message: 'El código ha expirado. Por favor, inicia sesión de nuevo para recibir un nuevo código.' });
+      }
+  
+      const receivedCode = String(code).trim();
+      const storedCode = String(user.tempCode).trim();
+  
+      console.log(`Código ingresado por el usuario (${email}): ${receivedCode}`);
+      console.log(`Código almacenado en la base de datos: ${storedCode}`);
+  
+      if (storedCode !== receivedCode) {
+        return res.status(400).json({ message: 'Código de verificación incorrecto' });
+      }
+  
+      user.tempCode = undefined;
+      user.tempCodeExpires = undefined;
+      await user.save();
+  
+      const token = jwt.sign({ id: user._id, email: user.email }, '12345', { expiresIn: '1h' });
+      res.status(200).json({ token });
+    } catch (error) {
+      res.status(500).json({ message: 'Error al verificar código', error });
+    }
+  };
 
 exports.verificarPin = async (req, res) => {
     try {
         const { token, userPin } = req.body;
-        
+
         if (!token) {
             throw new Error('Token no proporcionado');
         }
@@ -88,7 +202,7 @@ exports.verificarPin = async (req, res) => {
 exports.verificarAuth = async (req, res) => {
     try {
         const { token } = req.body;
-        
+
         const decoded = jwt.verify(token, '12345'); // Usa la misma clave secreta que cuando firmaste el token.
 
         if (decoded.verificar === 'false') {
