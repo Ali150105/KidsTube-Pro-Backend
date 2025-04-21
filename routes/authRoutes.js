@@ -6,6 +6,8 @@ router.post('/verificarPin', authController.verificarPin); // Añadir esta líne
 router.post('/verificarAuth', authController.verificarAuth); // Añadir esta línea para la verificación del PIN
 router.post('/login', authController.login);
 router.post('/register', authController.register); // Agregar esta línea para el registro de usuarios
+router.get('/verify-email', authController.verifyEmail);
+router.post('/verify-code', authController.verifyCode);
 
 
 
