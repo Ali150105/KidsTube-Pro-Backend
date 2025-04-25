@@ -5,12 +5,12 @@ const photoRoutes = require('./routes/photoRoutes');
 const playlistRoutes = require('./routes/playlistRoutes');
 const userRoutes = require('./routes/userRoutesRestricted');
 const videoRoutes = require('./routes/videoRoutes');
-const cors = require("cors");
-
+const cors = require('cors');
 
 
 const app = express();
 conectarDB();
+
 
 app.use(cors({
   domains: '*',

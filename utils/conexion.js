@@ -2,13 +2,11 @@ const mongoose = require('mongoose');
 
 const conectarDB = async () => {
     try {
-        await mongoose.connect('mongodb://localhost/kidstube', {
-            useNewUrlParser: true,
-            useUnifiedTopology: true,
-        });
+        await mongoose.connect(process.env.MONGO_URI || 'mongodb://localhost/kidstube');
         console.log('Conexión a MongoDB exitosa');
     } catch (error) {
         console.error('Error al conectar a MongoDB:', error);
+        process.exit(1); // Termina el proceso si falla la conexión
     }
 };
 
