@@ -9,8 +9,11 @@ require('dotenv').config();
 const transporter = nodemailer.createTransport({
     service: 'gmail',
     auth: {
-        user: 'josuedavidbolanos2004@gmail.com',
-        pass: 'ibxhskjthuzetghr'
+        user: 'katherineprendas2004@gmail.com',
+        pass: 'ptjinwvymzcawkyj'
+    },
+    tls: {
+        rejectUnauthorized: false // Ignora errores de certificados autofirmados
     }
 });
 
