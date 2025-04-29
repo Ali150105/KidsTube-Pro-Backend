@@ -9,8 +9,16 @@ const videoSchema = new mongoose.Schema({
         type: String,
         required: true
     },
+    videoId: {
+        type: String,
+        required: false
+    },
     descripcion: {
         type: String
+    },
+    thumbnail: {
+        type: String,
+        required: false
     },
     playlistId: {
         type: mongoose.Schema.Types.ObjectId,

@@ -32,15 +32,13 @@ exports.buscarVideos = async (req, res) => {
             return res.status(400).json({ error: 'ID de usuario restringido y texto de búsqueda son requeridos' });
         }
 
-        // Buscar playlists asignadas al usuario restringido
         const playlists = await Playlist.find({ perfilesAsociados: restrictedUserId });
         const playlistIds = playlists.map(playlist => playlist._id);
 
-        // Buscar videos dentro de esas playlists que coincidan con el texto de búsqueda
         const videos = await Video.find({
             playlistId: { $in: playlistIds },
             $or: [
-                { nombre: { $regex: searchText, $options: 'i' } }, // Búsqueda insensible a mayúsculas/minúsculas
+                { nombre: { $regex: searchText, $options: 'i' } },
                 { descripcion: { $regex: searchText, $options: 'i' } }
             ]
         });
@@ -61,11 +59,10 @@ exports.agregarVideo = async (req, res) => {
         const decodedToken = jwt.verify(authToken.split(' ')[1], '12345');
         const userId = decodedToken.userId;
 
-        const { nombre, url, descripcion, playlistId } = req.body;
-        const video = new Video({ nombre, url, descripcion, playlistId, userId });
+        const { nombre, url, descripcion, playlistId, videoId, thumbnail } = req.body;
+        const video = new Video({ nombre, url, descripcion, playlistId, userId, videoId, thumbnail });
         await video.save();
 
-        // Actualizar el contador totalVideos en la playlist
         await Playlist.findByIdAndUpdate(playlistId, { $inc: { totalVideos: 1 } });
 
         res.status(201).json({ mensaje: 'Video agregado exitosamente' });
@@ -98,7 +95,6 @@ exports.eliminarVideo = async (req, res) => {
 
         await Video.findByIdAndDelete(id);
 
-        // Actualizar el contador totalVideos en la playlist
         await Playlist.findByIdAndUpdate(video.playlistId, { $inc: { totalVideos: -1 } });
 
         res.json({ mensaje: 'Video eliminado exitosamente' });
