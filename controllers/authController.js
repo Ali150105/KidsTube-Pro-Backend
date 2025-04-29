@@ -3,7 +3,8 @@ const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const nodemailer = require('nodemailer');
 const twilio = require('twilio');
-require('dotenv').config(); // Carga las variables de entorno
+const { OAuth2Client } = require('google-auth-library');
+require('dotenv').config();
 
 const transporter = nodemailer.createTransport({
     service: 'gmail',
@@ -13,8 +14,8 @@ const transporter = nodemailer.createTransport({
     }
 });
 
-// Configuración de Twilio
 const twilioClient = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
 const calculateAge = (birthDate) => {
     const today = new Date();
@@ -51,7 +52,8 @@ exports.register = async (req, res) => {
             lastName,
             country,
             birthDate,
-            status: 'pending'
+            status: 'pending',
+            profileCompleted: true
         });
 
         await user.save();
@@ -92,6 +94,119 @@ exports.verifyEmail = async (req, res) => {
     }
 };
 
+exports.googleAuth = async (req, res) => {
+    try {
+        const { token } = req.body;
+
+        // Verificar el token de Google
+        const ticket = await googleClient.verifyIdToken({
+            idToken: token,
+            audience: process.env.GOOGLE_CLIENT_ID
+        });
+        const payload = ticket.getPayload();
+        const googleId = payload['sub'];
+        const email = payload['email'];
+        const name = payload['given_name'];
+        const lastName = payload['family_name'];
+
+        let user = await User.findOne({ googleId });
+
+        if (!user) {
+            // Registro: Crear nuevo usuario
+            user = await User.findOne({ email });
+            if (user) {
+                // El correo ya existe con otro método de autenticación
+                return res.status(400).json({ message: 'El correo ya está registrado con otro método de autenticación' });
+            }
+
+            user = new User({
+                googleId,
+                email,
+                name,
+                lastName,
+                status: 'active', // No requiere verificación de correo
+                profileCompleted: false // Necesita completar el perfil
+            });
+            await user.save();
+
+            // Generar token temporal para completar el perfil
+            const tempToken = jwt.sign({ userId: user._id, email: user.email }, process.env.JWT_SECRET || '12345', { expiresIn: '1h' });
+            return res.status(201).json({ tempToken, redirect: '/completeProfile.html' });
+        }
+
+        // Login: Usuario ya existe
+        if (!user.profileCompleted) {
+            // Perfil incompleto, redirigir a completar perfil
+            const tempToken = jwt.sign({ userId: user._id, email: user.email }, process.env.JWT_SECRET || '12345', { expiresIn: '1h' });
+            return res.status(200).json({ tempToken, redirect: '/completeProfile.html' });
+        }
+
+        // Perfil completo, proceder con 2FA
+        if (!user.phoneNumber || !/^\+\d{10,15}$/.test(user.phoneNumber)) {
+            return res.status(400).json({ message: 'Número de teléfono inválido. Completa tu perfil.' });
+        }
+
+        let verificationCode = user.tempCode;
+        const now = new Date();
+        if (!verificationCode || !user.tempCodeExpires || now > user.tempCodeExpires) {
+            verificationCode = Math.floor(100000 + Math.random() * 900000).toString();
+            user.tempCode = verificationCode;
+            user.tempCodeExpires = new Date(now.getTime() + 5 * 60 * 1000);
+            await user.save();
+
+            try {
+                const message = await twilioClient.messages.create({
+                    body: `Tu código de verificación para KidsTube es: ${verificationCode}`,
+                    from: process.env.TWILIO_PHONE_NUMBER,
+                    to: user.phoneNumber
+                });
+                console.log(`Mensaje enviado con SID: ${message.sid}`);
+            } catch (twilioError) {
+                console.error('Error al enviar SMS con Twilio:', twilioError);
+                return res.status(500).json({ message: 'Error al enviar el SMS', error: twilioError.message });
+            }
+        }
+
+        res.status(200).json({ message: 'Código de verificación enviado al SMS', email });
+    } catch (error) {
+        console.error('Error en autenticación con Google:', error);
+        res.status(500).json({ message: 'Error en autenticación con Google', error: error.message });
+    }
+};
+
+exports.completeProfile = async (req, res) => {
+    try {
+        const { token, phoneNumber, pin, country, birthDate } = req.body;
+
+        const decoded = jwt.verify(token, process.env.JWT_SECRET || '12345');
+        const user = await User.findOne({ _id: decoded.userId, email: decoded.email });
+
+        if (!user) {
+            return res.status(400).json({ message: 'Usuario no encontrado' });
+        }
+
+        const age = calculateAge(birthDate);
+        if (age < 18) {
+            return res.status(400).json({ message: 'Debes ser mayor de 18 años' });
+        }
+
+        user.phoneNumber = phoneNumber;
+        user.pin = pin;
+        user.country = country;
+        user.birthDate = birthDate;
+        user.profileCompleted = true;
+        user.status = 'active';
+
+        await user.save();
+
+        const authToken = jwt.sign({ userId: user._id, email: user.email }, process.env.JWT_SECRET || '12345', { expiresIn: '1h' });
+        res.status(200).json({ token: authToken, message: 'Perfil completado exitosamente' });
+    } catch (error) {
+        console.error('Error al completar perfil:', error);
+        res.status(500).json({ message: 'Error al completar perfil', error: error.message });
+    }
+};
+
 exports.login = async (req, res) => {
     try {
         const { email, password } = req.body;
@@ -99,6 +214,10 @@ exports.login = async (req, res) => {
 
         if (!user) {
             return res.status(400).json({ message: 'Usuario no encontrado' });
+        }
+
+        if (user.googleId) {
+            return res.status(400).json({ message: 'Este usuario está registrado con Google. Usa el inicio de sesión con Google.' });
         }
 
         if (user.status === 'pending') {
