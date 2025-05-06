@@ -37,18 +37,26 @@ La plataforma permite:
 
 1. Clona el repositorio en tu máquina local:
 
-   git clone https://github.com/Ali150105/KidsTube-Pro-Backend.git
+   
+```
+git clone https://github.com/Ali150105/KidsTube-Pro-Backend.git
 
+```
 2. Entra al directorio del backend:
 
+```
    cd KidsTube-Pro-Backend
 
+```
 3. Instala las dependencias:
-   
+
+```   
    npm install
-   
+  
+``` 
 5. Crea y configura el archivo `.env`:
 
+```
    MONGODB_URI=tu_cadena_de_conexion
    JWT_SECRET=tu_clave_super_secreta
    GOOGLE_CLIENT_ID=tu_google_client_id
@@ -59,8 +67,11 @@ La plataforma permite:
    EMAIL_USER=tu_correo
    EMAIL_PASS=tu_contraseña_del_correo
 
+```
 6. Inicia el servidor:
 
+```
    node app.js
 
+```
 
